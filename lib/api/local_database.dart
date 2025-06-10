@@ -1,311 +1,175 @@
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
+import '../models/cart_item.dart';
+import '../models/product.dart';
 
 class LocalDatabase {
-  static const String _keyCartHistory = 'cart_history';
-  static const String _keyCartData = 'cart_data_';
-  static const int _maxHistoryItems =
-      50; // Limit untuk mencegah storage overflow
+  static const String _keyCartItems = 'cart_items';
+  static const String _keyOrderHistory = 'order_history';
+  static const String _keyFavoriteProducts = 'favorite_products';
+  static const String _keyUserProfile = 'user_profile';
 
-  // === CART HISTORY METHODS ===
+  // === CART OPERATIONS ===
+  static Future<void> saveCartItems(List<CartItem> cartItems) async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    List<String> cartItemsJson =
+        cartItems.map((item) => json.encode(item.toJson())).toList();
+    await prefs.setStringList(_keyCartItems, cartItemsJson);
+  }
 
-  /// Menambahkan cart ID ke history
-  static Future<void> addToCartHistory(int cartId) async {
-    try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      List<String>? cartHistoryStrings = prefs.getStringList(_keyCartHistory);
-      List<int> cartHistory =
-          cartHistoryStrings?.map((id) => int.parse(id)).toList() ?? [];
+  static Future<List<CartItem>> getCartItems() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    List<String>? cartItemsJson = prefs.getStringList(_keyCartItems);
+    if (cartItemsJson == null) return [];
 
-      // Hindari duplikasi
-      if (!cartHistory.contains(cartId)) {
-        cartHistory.add(cartId);
+    return cartItemsJson.map((jsonString) {
+      Map<String, dynamic> jsonMap = json.decode(jsonString);
+      return CartItem(
+        product: Product.fromJson(jsonMap['product']),
+        quantity: jsonMap['quantity'],
+      );
+    }).toList();
+  }
 
-        // Batasi jumlah item dalam history
-        if (cartHistory.length > _maxHistoryItems) {
-          // Hapus item terlama
-          List<int> removedItems =
-              cartHistory.sublist(0, cartHistory.length - _maxHistoryItems);
-          cartHistory =
-              cartHistory.sublist(cartHistory.length - _maxHistoryItems);
+  static Future<void> clearCart() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_keyCartItems);
+  }
 
-          // Hapus data cart yang sudah tidak diperlukan
-          for (int removedId in removedItems) {
-            await _removeCartData(removedId);
-          }
-        }
+  // === ORDER HISTORY OPERATIONS ===
+  static Future<void> addOrderToHistory(List<CartItem> cartItems) async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    List<String>? historyJson = prefs.getStringList(_keyOrderHistory);
 
-        // Simpan kembali ke SharedPreferences
-        List<String> cartHistoryStrings =
-            cartHistory.map((id) => id.toString()).toList();
-        await prefs.setStringList(_keyCartHistory, cartHistoryStrings);
+    Map<String, dynamic> order = {
+      'id': DateTime.now().millisecondsSinceEpoch.toString(),
+      'date': DateTime.now().toIso8601String(),
+      'items': cartItems.map((item) => item.toJson()).toList(),
+      'total': cartItems.fold(0.0, (total, item) {}),
+    };
+
+    if (historyJson == null) {
+      historyJson = [json.encode(order)];
+    } else {
+      historyJson.add(json.encode(order));
+    }
+
+    await prefs.setStringList(_keyOrderHistory, historyJson);
+  }
+
+  static Future<List<Map<String, dynamic>>> getOrderHistory() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    List<String>? historyJson = prefs.getStringList(_keyOrderHistory);
+    if (historyJson == null) return [];
+
+    return historyJson.map((jsonString) {
+      return json.decode(jsonString) as Map<String, dynamic>;
+    }).toList();
+  }
+
+  static Future<void> deleteOrderFromHistory(String orderId) async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    List<String>? historyJson = prefs.getStringList(_keyOrderHistory);
+    if (historyJson == null) return;
+
+    historyJson.removeWhere((jsonString) {
+      Map<String, dynamic> order = json.decode(jsonString);
+      return order['id'] == orderId;
+    });
+
+    await prefs.setStringList(_keyOrderHistory, historyJson);
+  }
+
+  static Future<void> clearOrderHistory() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_keyOrderHistory);
+  }
+
+  // === FAVORITE PRODUCTS OPERATIONS ===
+  static Future<void> addToFavorites(Product product) async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    List<String>? favoritesJson = prefs.getStringList(_keyFavoriteProducts);
+
+    if (favoritesJson == null) {
+      favoritesJson = [json.encode(product.toJson())];
+    } else {
+      // Check if product already exists
+      bool exists = favoritesJson.any((jsonString) {
+        Map<String, dynamic> favoriteProduct = json.decode(jsonString);
+        return favoriteProduct['id'] == product.id;
+      });
+
+      if (!exists) {
+        favoritesJson.add(json.encode(product.toJson()));
       }
-    } catch (e) {
-      print('Error adding cart to history: $e');
-      throw Exception('Failed to add cart to history');
     }
+
+    await prefs.setStringList(_keyFavoriteProducts, favoritesJson);
   }
 
-  /// Mengambil daftar cart ID dari history
-  static Future<List<int>> getCartHistory() async {
-    try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      List<String>? cartHistoryStrings = prefs.getStringList(_keyCartHistory);
-      return cartHistoryStrings?.map((id) => int.parse(id)).toList() ?? [];
-    } catch (e) {
-      print('Error getting cart history: $e');
-      return [];
-    }
+  static Future<void> removeFromFavorites(int productId) async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    List<String>? favoritesJson = prefs.getStringList(_keyFavoriteProducts);
+    if (favoritesJson == null) return;
+
+    favoritesJson.removeWhere((jsonString) {
+      Map<String, dynamic> favoriteProduct = json.decode(jsonString);
+      return favoriteProduct['id'] == productId;
+    });
+
+    await prefs.setStringList(_keyFavoriteProducts, favoritesJson);
   }
 
-  /// Menghapus cart dari history
-  static Future<void> removeFromCartHistory(int cartId) async {
-    try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      List<String>? cartHistoryStrings = prefs.getStringList(_keyCartHistory);
-      List<int> cartHistory =
-          cartHistoryStrings?.map((id) => int.parse(id)).toList() ?? [];
+  static Future<List<Product>> getFavoriteProducts() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    List<String>? favoritesJson = prefs.getStringList(_keyFavoriteProducts);
+    if (favoritesJson == null) return [];
 
-      if (cartHistory.contains(cartId)) {
-        cartHistory.remove(cartId);
-
-        // Update SharedPreferences
-        List<String> updatedHistoryStrings =
-            cartHistory.map((id) => id.toString()).toList();
-        await prefs.setStringList(_keyCartHistory, updatedHistoryStrings);
-
-        // Hapus data cart terkait
-        await _removeCartData(cartId);
-      }
-    } catch (e) {
-      print('Error removing cart from history: $e');
-      throw Exception('Failed to remove cart from history');
-    }
+    return favoritesJson.map((jsonString) {
+      Map<String, dynamic> productJson = json.decode(jsonString);
+      return Product.fromJson(productJson);
+    }).toList();
   }
 
-  /// Membersihkan seluruh history
-  static Future<void> clearCartHistory() async {
-    try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-
-      // Ambil daftar cart yang akan dihapus
-      List<int> cartHistory = await getCartHistory();
-
-      // Hapus semua data cart
-      for (int cartId in cartHistory) {
-        await _removeCartData(cartId);
-      }
-
-      // Hapus history list
-      await prefs.remove(_keyCartHistory);
-    } catch (e) {
-      print('Error clearing cart history: $e');
-      throw Exception('Failed to clear cart history');
-    }
+  static Future<bool> isProductFavorite(int productId) async {
+    List<Product> favorites = await getFavoriteProducts();
+    return favorites.any((product) => product.id == productId);
   }
 
-  /// Mengecek apakah cart ID ada dalam history
-  static Future<bool> isCartInHistory(int cartId) async {
-    try {
-      List<int> cartHistory = await getCartHistory();
-      return cartHistory.contains(cartId);
-    } catch (e) {
-      print('Error checking cart in history: $e');
-      return false;
-    }
+  // === USER PROFILE OPERATIONS ===
+  static Future<void> saveUserProfile(Map<String, dynamic> profile) async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyUserProfile, json.encode(profile));
   }
 
-  /// Mendapatkan jumlah item dalam history
-  static Future<int> getHistoryCount() async {
-    try {
-      List<int> cartHistory = await getCartHistory();
-      return cartHistory.length;
-    } catch (e) {
-      print('Error getting history count: $e');
-      return 0;
-    }
+  static Future<Map<String, dynamic>?> getUserProfile() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? profileJson = prefs.getString(_keyUserProfile);
+    if (profileJson == null) return null;
+
+    return json.decode(profileJson) as Map<String, dynamic>;
   }
 
-  // === CART DATA METHODS ===
-
-  /// Menyimpan data cart lengkap untuk akses offline
-  static Future<void> saveCartData(
-      int cartId, Map<String, dynamic> cartData) async {
-    try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      String cartDataJson = json.encode(cartData);
-      await prefs.setString('$_keyCartData$cartId', cartDataJson);
-    } catch (e) {
-      print('Error saving cart data: $e');
-      throw Exception('Failed to save cart data');
-    }
-  }
-
-  /// Mengambil data cart yang disimpan secara lokal
-  static Future<Map<String, dynamic>?> getCartData(int cartId) async {
-    try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      String? cartDataJson = prefs.getString('$_keyCartData$cartId');
-
-      if (cartDataJson != null) {
-        return json.decode(cartDataJson) as Map<String, dynamic>;
-      }
-      return null;
-    } catch (e) {
-      print('Error getting cart data: $e');
-      return null;
-    }
-  }
-
-  /// Menghapus data cart tertentu
-  static Future<void> _removeCartData(int cartId) async {
-    try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      await prefs.remove('$_keyCartData$cartId');
-    } catch (e) {
-      print('Error removing cart data: $e');
-    }
-  }
-
-  /// Mendapatkan semua data cart yang tersimpan
-  static Future<Map<int, Map<String, dynamic>>> getAllCartData() async {
-    try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      Set<String> keys = prefs.getKeys();
-      Map<int, Map<String, dynamic>> allCartData = {};
-
-      for (String key in keys) {
-        if (key.startsWith(_keyCartData)) {
-          String cartIdString = key.substring(_keyCartData.length);
-          int? cartId = int.tryParse(cartIdString);
-
-          if (cartId != null) {
-            String? cartDataJson = prefs.getString(key);
-            if (cartDataJson != null) {
-              try {
-                Map<String, dynamic> cartData = json.decode(cartDataJson);
-                allCartData[cartId] = cartData;
-              } catch (e) {
-                print('Error parsing cart data for ID $cartId: $e');
-                // Hapus data yang rusak
-                await prefs.remove(key);
-              }
-            }
-          }
-        }
-      }
-
-      return allCartData;
-    } catch (e) {
-      print('Error getting all cart data: $e');
-      return {};
-    }
+  static Future<void> clearUserProfile() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_keyUserProfile);
   }
 
   // === UTILITY METHODS ===
-
-  /// Membersihkan data yang rusak atau tidak valid
-  static Future<void> cleanupInvalidData() async {
-    try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      Set<String> keys = prefs.getKeys();
-      List<String> keysToRemove = [];
-
-      for (String key in keys) {
-        if (key.startsWith(_keyCartData)) {
-          String? cartDataJson = prefs.getString(key);
-          if (cartDataJson != null) {
-            try {
-              json.decode(cartDataJson);
-            } catch (e) {
-              // Data rusak, tandai untuk dihapus
-              keysToRemove.add(key);
-            }
-          }
-        }
-      }
-
-      // Hapus data yang rusak
-      for (String key in keysToRemove) {
-        await prefs.remove(key);
-      }
-
-      print('Cleaned up ${keysToRemove.length} invalid data entries');
-    } catch (e) {
-      print('Error during cleanup: $e');
-    }
+  static Future<void> clearAllData() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.clear();
   }
 
-  /// Mendapatkan ukuran storage yang digunakan (perkiraan)
-  static Future<int> getStorageSize() async {
-    try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      Set<String> keys = prefs.getKeys();
-      int totalSize = 0;
+  static Future<Map<String, dynamic>> getStorageInfo() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    Set<String> keys = prefs.getKeys();
 
-      for (String key in keys) {
-        if (key.startsWith(_keyCartHistory) || key.startsWith(_keyCartData)) {
-          String? value = prefs.getString(key);
-          if (value != null) {
-            totalSize += value.length;
-          }
-        }
-      }
-
-      return totalSize;
-    } catch (e) {
-      print('Error calculating storage size: $e');
-      return 0;
+    Map<String, dynamic> info = {};
+    for (String key in keys) {
+      info[key] = prefs.get(key);
     }
-  }
 
-  /// Export data untuk backup
-  static Future<Map<String, dynamic>> exportData() async {
-    try {
-      List<int> cartHistory = await getCartHistory();
-      Map<int, Map<String, dynamic>> allCartData = await getAllCartData();
-
-      return {
-        'cartHistory': cartHistory,
-        'cartData': allCartData,
-        'exportDate': DateTime.now().toIso8601String(),
-      };
-    } catch (e) {
-      print('Error exporting data: $e');
-      throw Exception('Failed to export data');
-    }
-  }
-
-  /// Import data dari backup
-  static Future<void> importData(Map<String, dynamic> backupData) async {
-    try {
-      // Clear existing data
-      await clearCartHistory();
-
-      // Import cart history
-      if (backupData['cartHistory'] != null) {
-        List<dynamic> historyData = backupData['cartHistory'];
-        List<int> cartHistory = historyData.cast<int>();
-
-        SharedPreferences prefs = await SharedPreferences.getInstance();
-        List<String> cartHistoryStrings =
-            cartHistory.map((id) => id.toString()).toList();
-        await prefs.setStringList(_keyCartHistory, cartHistoryStrings);
-      }
-
-      // Import cart data
-      if (backupData['cartData'] != null) {
-        Map<String, dynamic> cartDataMap = backupData['cartData'];
-        for (String cartIdString in cartDataMap.keys) {
-          int? cartId = int.tryParse(cartIdString);
-          if (cartId != null && cartDataMap[cartIdString] != null) {
-            await saveCartData(cartId, cartDataMap[cartIdString]);
-          }
-        }
-      }
-    } catch (e) {
-      print('Error importing data: $e');
-      throw Exception('Failed to import data');
-    }
+    return info;
   }
 }
