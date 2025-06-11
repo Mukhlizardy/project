@@ -1,9 +1,6 @@
 import 'package:flutter/material.dart';
 import '../api/cart_api.dart';
 import '../models/cart_item.dart';
-import '../api/local_database.dart';
-import '../api/fakestore_api.dart';
-import '../models/cart.dart';
 
 class CartScreen extends StatefulWidget {
   @override
@@ -19,73 +16,31 @@ class _CartScreenState extends State<CartScreen> {
     fetchCartItems();
   }
 
-  Future<void> fetchCartItems() async {
-    // Ambil cart items dari CartApi (local cart)
-    List<CartItem> localCartItems = CartApi.getCartItems();
+  void fetchCartItems() {
     setState(() {
-      cartItems = localCartItems;
+      cartItems = CartApi.getCartItems();
     });
   }
 
-  Future<void> _removeFromCart(int productId) async {
-    await CartApi.removeFromCart(productId);
-    fetchCartItems();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Product removed from cart!')),
-    );
-  }
-
-  Future<void> _updateQuantity(int productId, int newQuantity) async {
+  void _updateQuantity(int index, int newQuantity) {
     if (newQuantity <= 0) {
-      await _removeFromCart(productId);
+      _removeItem(index);
     } else {
-      await CartApi.updateQuantity(productId, newQuantity);
-      fetchCartItems();
+      setState(() {
+        cartItems[index].quantity = newQuantity;
+      });
     }
   }
 
-  Future<void> _checkout() async {
-    if (cartItems.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Cart is empty!')),
-      );
-      return;
-    }
-
-    // Simulasi checkout - simpan ke history dan clear cart
-    try {
-      // Untuk setiap item di cart, buat cart entry di FakeStore API
-      for (CartItem item in cartItems) {
-        Cart newCart = Cart(
-          id: 0,
-          productId: item.product.id,
-          productName: item.product.title,
-          price: item.product.price,
-          quantity: item.quantity,
-        );
-
-        Cart createdCart = await FakeStoreApi.createCart(newCart);
-        // Simpan cart ID ke history
-        await LocalDatabase.addToCartHistory(createdCart.id);
-      }
-
-      // Clear cart setelah checkout
-      await CartApi.clearCart();
-      fetchCartItems();
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Checkout successful!')),
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Checkout failed: $e')),
-      );
-    }
+  void _removeItem(int index) {
+    setState(() {
+      cartItems.removeAt(index);
+    });
   }
 
   double _calculateTotal() {
     return cartItems.fold(
-        0.0, (total, item) => total + (item.product.price * item.quantity));
+        0.0, (sum, item) => sum + (item.product.price * item.quantity));
   }
 
   @override
@@ -93,19 +48,25 @@ class _CartScreenState extends State<CartScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text('Cart'),
-        backgroundColor: Colors.green,
+        backgroundColor: Colors.orange,
       ),
       body: cartItems.isEmpty
           ? Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.shopping_cart_outlined,
-                      size: 80, color: Colors.grey),
+                  Icon(
+                    Icons.shopping_cart_outlined,
+                    size: 80,
+                    color: Colors.grey,
+                  ),
                   SizedBox(height: 16),
                   Text(
                     'Your cart is empty',
-                    style: TextStyle(fontSize: 18, color: Colors.grey),
+                    style: TextStyle(
+                      fontSize: 18,
+                      color: Colors.grey[600],
+                    ),
                   ),
                 ],
               ),
@@ -114,61 +75,95 @@ class _CartScreenState extends State<CartScreen> {
               children: [
                 Expanded(
                   child: ListView.builder(
+                    padding: EdgeInsets.all(8),
                     itemCount: cartItems.length,
                     itemBuilder: (context, index) {
-                      final cartItem = cartItems[index];
+                      final item = cartItems[index];
                       return Card(
-                        margin: EdgeInsets.all(8.0),
-                        child: ListTile(
-                          leading: Container(
-                            width: 60,
-                            height: 60,
-                            child: Image.network(
-                              cartItem.product.image,
-                              fit: BoxFit.cover,
-                              errorBuilder: (context, error, stackTrace) =>
-                                  Icon(Icons.image_not_supported),
-                            ),
-                          ),
-                          title: Text(
-                            cartItem.product.title,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          subtitle: Text(
-                            '\$${cartItem.product.price.toStringAsFixed(2)}',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: Colors.green,
-                            ),
-                          ),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
+                        margin: EdgeInsets.symmetric(vertical: 4),
+                        child: Padding(
+                          padding: EdgeInsets.all(8),
+                          child: Row(
                             children: [
-                              IconButton(
-                                icon: Icon(Icons.remove),
-                                onPressed: () {
-                                  _updateQuantity(cartItem.product.id,
-                                      cartItem.quantity - 1);
-                                },
+                              // Product Image
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: Image.network(
+                                  item.product.image,
+                                  width: 60,
+                                  height: 60,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (context, error, stackTrace) {
+                                    return Container(
+                                      width: 60,
+                                      height: 60,
+                                      color: Colors.grey[300],
+                                      child: Icon(Icons.image_not_supported),
+                                    );
+                                  },
+                                ),
                               ),
-                              Text(
-                                '${cartItem.quantity}',
-                                style: TextStyle(
-                                    fontSize: 16, fontWeight: FontWeight.bold),
+                              SizedBox(width: 12),
+                              // Product Details
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      item.product.title,
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 14,
+                                      ),
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    SizedBox(height: 4),
+                                    Text(
+                                      '\$${item.product.price.toStringAsFixed(2)}',
+                                      style: TextStyle(
+                                        color: Colors.green,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
-                              IconButton(
-                                icon: Icon(Icons.add),
-                                onPressed: () {
-                                  _updateQuantity(cartItem.product.id,
-                                      cartItem.quantity + 1);
-                                },
+                              // Quantity Controls
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(
+                                    onPressed: () => _updateQuantity(
+                                        index, item.quantity - 1),
+                                    icon: Icon(Icons.remove),
+                                    iconSize: 20,
+                                  ),
+                                  Container(
+                                    padding: EdgeInsets.symmetric(
+                                        horizontal: 12, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      border: Border.all(color: Colors.grey),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text(
+                                      '${item.quantity}',
+                                      style: TextStyle(
+                                          fontWeight: FontWeight.bold),
+                                    ),
+                                  ),
+                                  IconButton(
+                                    onPressed: () => _updateQuantity(
+                                        index, item.quantity + 1),
+                                    icon: Icon(Icons.add),
+                                    iconSize: 20,
+                                  ),
+                                ],
                               ),
+                              // Remove Button
                               IconButton(
+                                onPressed: () => _removeItem(index),
                                 icon: Icon(Icons.delete, color: Colors.red),
-                                onPressed: () {
-                                  _removeFromCart(cartItem.product.id);
-                                },
                               ),
                             ],
                           ),
@@ -177,33 +172,73 @@ class _CartScreenState extends State<CartScreen> {
                     },
                   ),
                 ),
+                // Total and Checkout
                 Container(
-                  padding: EdgeInsets.all(16.0),
+                  padding: EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: Colors.grey.shade100,
-                    border:
-                        Border(top: BorderSide(color: Colors.grey.shade300)),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        'Total: \$${_calculateTotal().toStringAsFixed(2)}',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
+                    color: Colors.white,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.grey.withOpacity(0.3),
+                        spreadRadius: 1,
+                        blurRadius: 5,
+                        offset: Offset(0, -2),
                       ),
-                      ElevatedButton(
-                        onPressed: _checkout,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green,
-                          padding: EdgeInsets.symmetric(
-                              horizontal: 32, vertical: 12),
-                        ),
-                        child: Text(
-                          'Checkout',
-                          style: TextStyle(color: Colors.white),
+                    ],
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            'Total:',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          Text(
+                            '\$${_calculateTotal().toStringAsFixed(2)}',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.green,
+                            ),
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          onPressed: cartItems.isEmpty
+                              ? null
+                              : () {
+                                  // Implement checkout logic here
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content:
+                                          Text('Checkout feature coming soon!'),
+                                      backgroundColor: Colors.green,
+                                    ),
+                                  );
+                                },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.green,
+                            padding: EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                          child: Text(
+                            'Checkout',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
                         ),
                       ),
                     ],

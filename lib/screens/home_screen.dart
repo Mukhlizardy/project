@@ -17,7 +17,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadCartCount() async {
-    await CartApi.initializeCart();
+    await CartApi();
     setState(() {
       cartItemCount = CartApi.getTotalItems();
     });

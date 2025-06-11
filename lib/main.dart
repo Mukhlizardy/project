@@ -3,7 +3,7 @@ import 'screens/login_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/product_screen.dart';
 import 'screens/cart_screen.dart';
-import 'screens/history_screen.dart';
+//import 'screens/history_screen.dart';
 import 'api/local_auth.dart';
 import 'api/cart_api.dart';
 
@@ -12,7 +12,7 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // Initialize cart from local storage
-  await CartApi.initializeCart();
+  await CartApi();
 
   runApp(GroceryApp());
 }
@@ -51,7 +51,7 @@ class GroceryApp extends StatelessWidget {
         '/home': (context) => HomeScreen(),
         '/products': (context) => ProductScreen(),
         '/cart': (context) => CartScreen(),
-        '/history': (context) => HistoryScreen(),
+        //'/history': (context) => HistoryScreen(),
       },
     );
   }

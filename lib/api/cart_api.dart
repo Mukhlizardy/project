@@ -1,96 +1,80 @@
 import '../models/product.dart';
 import '../models/cart_item.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
 
 class CartApi {
   static List<CartItem> _cartItems = [];
-  static const String _keyCartItems = 'cart_items';
 
   static List<CartItem> getCartItems() {
-    return _cartItems;
-  }
-
-  // Initialize cart from shared preferences
-  static Future<void> initializeCart() async {
-    try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      String? cartData = prefs.getString(_keyCartItems);
-
-      if (cartData != null) {
-        List<dynamic> jsonList = json.decode(cartData);
-        _cartItems = jsonList.map((json) => CartItem.fromJson(json)).toList();
-      }
-    } catch (e) {
-      print('Error loading cart from storage: $e');
-      _cartItems = [];
-    }
-  }
-
-  // Save cart to shared preferences
-  static Future<void> _saveCartToStorage() async {
-    try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      String cartData =
-          json.encode(_cartItems.map((item) => item.toJson()).toList());
-      await prefs.setString(_keyCartItems, cartData);
-    } catch (e) {
-      print('Error saving cart to storage: $e');
-    }
+    return List.from(
+        _cartItems); // Return a copy to prevent external modification
   }
 
   static Future<void> addToCart(Product product) async {
-    // Check if the product is already in the cart
-    bool productExists =
-        _cartItems.any((item) => item.product.id == product.id);
+    // Simulate API delay
+    await Future.delayed(Duration(milliseconds: 100));
 
-    if (productExists) {
+    // Check if the product is already in the cart
+    int existingIndex =
+        _cartItems.indexWhere((item) => item.product.id == product.id);
+
+    if (existingIndex != -1) {
       // If the product exists, update its quantity
-      _cartItems.forEach((item) {
-        if (item.product.id == product.id) {
-          item.quantity++;
-        }
-      });
+      _cartItems[existingIndex].quantity++;
     } else {
       // If the product doesn't exist, add it to the cart
       _cartItems.add(CartItem(product: product, quantity: 1));
     }
+  }
 
-    await _saveCartToStorage();
+  static Future<void> updateCartItem(int productId, int newQuantity) async {
+    // Simulate API delay
+    await Future.delayed(Duration(milliseconds: 100));
+
+    int index = _cartItems.indexWhere((item) => item.product.id == productId);
+    if (index != -1) {
+      if (newQuantity <= 0) {
+        _cartItems.removeAt(index);
+      } else {
+        _cartItems[index].quantity = newQuantity;
+      }
+    }
   }
 
   static Future<void> removeFromCart(int productId) async {
+    // Simulate API delay
+    await Future.delayed(Duration(milliseconds: 100));
+
     _cartItems.removeWhere((item) => item.product.id == productId);
-    await _saveCartToStorage();
-  }
-
-  static Future<void> updateQuantity(int productId, int newQuantity) async {
-    if (newQuantity <= 0) {
-      await removeFromCart(productId);
-      return;
-    }
-
-    for (CartItem item in _cartItems) {
-      if (item.product.id == productId) {
-        item.quantity = newQuantity;
-        break;
-      }
-    }
-
-    await _saveCartToStorage();
   }
 
   static Future<void> clearCart() async {
+    // Simulate API delay
+    await Future.delayed(Duration(milliseconds: 100));
+
     _cartItems.clear();
-    await _saveCartToStorage();
   }
 
-  static int getCartItemCount() {
-    return _cartItems.fold(0, (total, item) => total + item.quantity);
-  }
-
-  static double getCartTotal() {
+  static double getTotalPrice() {
     return _cartItems.fold(
-        0.0, (total, item) => total + (item.product.price * item.quantity));
+        0.0, (sum, item) => sum + (item.product.price * item.quantity));
+  }
+
+  static int getTotalItems() {
+    return _cartItems.fold(0, (sum, item) => sum + item.quantity);
+  }
+
+  static bool isProductInCart(int productId) {
+    return _cartItems.any((item) => item.product.id == productId);
+  }
+
+  static int getProductQuantity(int productId) {
+    CartItem? item = _cartItems.firstWhere(
+      (item) => item.product.id == productId,
+      orElse: () => CartItem(
+          product:
+              Product(id: -1, title: '', description: '', price: 0, image: ''),
+          quantity: 0),
+    );
+    return item.product.id == -1 ? 0 : item.quantity;
   }
 }
