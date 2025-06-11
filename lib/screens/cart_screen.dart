@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import '../api/cart_api.dart';
 import '../models/cart_item.dart';
+import '../api/local_database.dart';
+import '../api/fakestore_api.dart';
+import '../models/cart.dart';
 
 class CartScreen extends StatefulWidget {
   @override
@@ -9,324 +12,205 @@ class CartScreen extends StatefulWidget {
 
 class _CartScreenState extends State<CartScreen> {
   List<CartItem> cartItems = [];
-  bool isLoading = true;
 
   @override
   void initState() {
     super.initState();
-    loadCartItems();
+    fetchCartItems();
   }
 
-  Future<void> loadCartItems() async {
+  Future<void> fetchCartItems() async {
+    // Ambil cart items dari CartApi (local cart)
+    List<CartItem> localCartItems = CartApi.getCartItems();
     setState(() {
-      isLoading = true;
-    });
-
-    await CartApi.initializeCart();
-    setState(() {
-      cartItems = CartApi.getCartItems();
-      isLoading = false;
+      cartItems = localCartItems;
     });
   }
 
-  Future<void> updateQuantity(int productId, int newQuantity) async {
-    await CartApi.updateQuantity(productId, newQuantity);
-    setState(() {
-      cartItems = CartApi.getCartItems();
-    });
-  }
-
-  Future<void> removeItem(int productId) async {
+  Future<void> _removeFromCart(int productId) async {
     await CartApi.removeFromCart(productId);
-    setState(() {
-      cartItems = CartApi.getCartItems();
-    });
+    fetchCartItems();
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Item removed from cart')),
+      SnackBar(content: Text('Product removed from cart!')),
     );
   }
 
-  Future<void> checkout() async {
+  Future<void> _updateQuantity(int productId, int newQuantity) async {
+    if (newQuantity <= 0) {
+      await _removeFromCart(productId);
+    } else {
+      await CartApi.updateQuantity(productId, newQuantity);
+      fetchCartItems();
+    }
+  }
+
+  Future<void> _checkout() async {
     if (cartItems.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Cart is empty')),
+        SnackBar(content: Text('Cart is empty!')),
       );
       return;
     }
 
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: Text('Confirm Checkout'),
-          content: Text(
-              'Total: \$${CartApi.getTotalPrice().toStringAsFixed(2)}\n\nProceed with checkout?'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                Navigator.of(context).pop();
-                await CartApi.saveCartAsOrder();
-                setState(() {
-                  cartItems = CartApi.getCartItems();
-                });
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Order placed successfully!')),
-                );
-              },
-              child: Text('Checkout'),
-            ),
-          ],
+    // Simulasi checkout - simpan ke history dan clear cart
+    try {
+      // Untuk setiap item di cart, buat cart entry di FakeStore API
+      for (CartItem item in cartItems) {
+        Cart newCart = Cart(
+          id: 0,
+          productId: item.product.id,
+          productName: item.product.title,
+          price: item.product.price,
+          quantity: item.quantity,
         );
-      },
-    );
+
+        Cart createdCart = await FakeStoreApi.createCart(newCart);
+        // Simpan cart ID ke history
+        await LocalDatabase.addToCartHistory(createdCart.id);
+      }
+
+      // Clear cart setelah checkout
+      await CartApi.clearCart();
+      fetchCartItems();
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Checkout successful!')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Checkout failed: $e')),
+      );
+    }
+  }
+
+  double _calculateTotal() {
+    return cartItems.fold(
+        0.0, (total, item) => total + (item.product.price * item.quantity));
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Shopping Cart'),
+        title: Text('Cart'),
         backgroundColor: Colors.green,
-        foregroundColor: Colors.white,
-        actions: [
-          if (cartItems.isNotEmpty)
-            IconButton(
-              icon: Icon(Icons.delete_sweep),
-              onPressed: () async {
-                showDialog(
-                  context: context,
-                  builder: (BuildContext context) {
-                    return AlertDialog(
-                      title: Text('Clear Cart'),
-                      content: Text('Are you sure you want to clear the cart?'),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.of(context).pop(),
-                          child: Text('Cancel'),
-                        ),
-                        ElevatedButton(
-                          onPressed: () async {
-                            Navigator.of(context).pop();
-                            await CartApi.clearCart();
-                            setState(() {
-                              cartItems = CartApi.getCartItems();
-                            });
-                          },
-                          child: Text('Clear'),
-                        ),
-                      ],
-                    );
-                  },
-                );
-              },
-            ),
-        ],
       ),
-      body: isLoading
-          ? Center(child: CircularProgressIndicator())
-          : cartItems.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.shopping_cart_outlined,
-                        size: 80,
-                        color: Colors.grey,
-                      ),
-                      SizedBox(height: 16),
-                      Text(
-                        'Your cart is empty',
-                        style: TextStyle(
-                          fontSize: 18,
-                          color: Colors.grey,
-                        ),
-                      ),
-                      SizedBox(height: 16),
-                      ElevatedButton(
-                        onPressed: () =>
-                            Navigator.pushNamed(context, '/products'),
-                        child: Text('Continue Shopping'),
-                      ),
-                    ],
+      body: cartItems.isEmpty
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.shopping_cart_outlined,
+                      size: 80, color: Colors.grey),
+                  SizedBox(height: 16),
+                  Text(
+                    'Your cart is empty',
+                    style: TextStyle(fontSize: 18, color: Colors.grey),
                   ),
-                )
-              : Column(
-                  children: [
-                    Expanded(
-                      child: ListView.builder(
-                        padding: EdgeInsets.all(8),
-                        itemCount: cartItems.length,
-                        itemBuilder: (context, index) {
-                          final item = cartItems[index];
-                          return Card(
-                            margin: EdgeInsets.symmetric(vertical: 4),
-                            child: Padding(
-                              padding: EdgeInsets.all(12),
-                              child: Row(
-                                children: [
-                                  // Product Image
-                                  Container(
-                                    width: 60,
-                                    height: 60,
-                                    decoration: BoxDecoration(
-                                      borderRadius: BorderRadius.circular(8),
-                                      color: Colors.grey[200],
-                                    ),
-                                    child: ClipRRect(
-                                      borderRadius: BorderRadius.circular(8),
-                                      child: Image.network(
-                                        item.product.image,
-                                        fit: BoxFit.cover,
-                                        errorBuilder:
-                                            (context, error, stackTrace) {
-                                          return Icon(
-                                              Icons.image_not_supported);
-                                        },
-                                      ),
-                                    ),
-                                  ),
-                                  SizedBox(width: 12),
-
-                                  // Product Details
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          item.product.title,
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 14,
-                                          ),
-                                          maxLines: 2,
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                        SizedBox(height: 4),
-                                        Text(
-                                          '\$${item.product.price.toStringAsFixed(2)}',
-                                          style: TextStyle(
-                                            color: Colors.green,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-
-                                  // Quantity Controls
-                                  Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      IconButton(
-                                        onPressed: () {
-                                          if (item.quantity > 1) {
-                                            updateQuantity(item.product.id,
-                                                item.quantity - 1);
-                                          }
-                                        },
-                                        icon: Icon(Icons.remove_circle_outline),
-                                        color: Colors.red,
-                                      ),
-                                      Text(
-                                        '${item.quantity}',
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 16,
-                                        ),
-                                      ),
-                                      IconButton(
-                                        onPressed: () {
-                                          updateQuantity(item.product.id,
-                                              item.quantity + 1);
-                                        },
-                                        icon: Icon(Icons.add_circle_outline),
-                                        color: Colors.green,
-                                      ),
-                                    ],
-                                  ),
-
-                                  // Delete Button
-                                  IconButton(
-                                    onPressed: () =>
-                                        removeItem(item.product.id),
-                                    icon: Icon(Icons.delete_outline),
-                                    color: Colors.red,
-                                  ),
-                                ],
-                              ),
+                ],
+              ),
+            )
+          : Column(
+              children: [
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: cartItems.length,
+                    itemBuilder: (context, index) {
+                      final cartItem = cartItems[index];
+                      return Card(
+                        margin: EdgeInsets.all(8.0),
+                        child: ListTile(
+                          leading: Container(
+                            width: 60,
+                            height: 60,
+                            child: Image.network(
+                              cartItem.product.image,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) =>
+                                  Icon(Icons.image_not_supported),
                             ),
-                          );
-                        },
-                      ),
-                    ),
-
-                    // Bottom Summary
-                    Container(
-                      padding: EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        border:
-                            Border(top: BorderSide(color: Colors.grey[300]!)),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.1),
-                            blurRadius: 4,
-                            offset: Offset(0, -2),
                           ),
-                        ],
-                      ),
-                      child: Column(
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          title: Text(
+                            cartItem.product.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          subtitle: Text(
+                            '\$${cartItem.product.price.toStringAsFixed(2)}',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Colors.green,
+                            ),
+                          ),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
                             children: [
-                              Text(
-                                'Total Items: ${CartApi.getTotalItems()}',
-                                style: TextStyle(fontSize: 16),
+                              IconButton(
+                                icon: Icon(Icons.remove),
+                                onPressed: () {
+                                  _updateQuantity(cartItem.product.id,
+                                      cartItem.quantity - 1);
+                                },
                               ),
                               Text(
-                                'Total: \$${CartApi.getTotalPrice().toStringAsFixed(2)}',
+                                '${cartItem.quantity}',
                                 style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.green,
-                                ),
+                                    fontSize: 16, fontWeight: FontWeight.bold),
+                              ),
+                              IconButton(
+                                icon: Icon(Icons.add),
+                                onPressed: () {
+                                  _updateQuantity(cartItem.product.id,
+                                      cartItem.quantity + 1);
+                                },
+                              ),
+                              IconButton(
+                                icon: Icon(Icons.delete, color: Colors.red),
+                                onPressed: () {
+                                  _removeFromCart(cartItem.product.id);
+                                },
                               ),
                             ],
                           ),
-                          SizedBox(height: 12),
-                          SizedBox(
-                            width: double.infinity,
-                            child: ElevatedButton(
-                              onPressed: checkout,
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.green,
-                                foregroundColor: Colors.white,
-                                padding: EdgeInsets.symmetric(vertical: 12),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                              ),
-                              child: Text(
-                                'Checkout',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
+                        ),
+                      );
+                    },
+                  ),
                 ),
+                Container(
+                  padding: EdgeInsets.all(16.0),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade100,
+                    border:
+                        Border(top: BorderSide(color: Colors.grey.shade300)),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Total: \$${_calculateTotal().toStringAsFixed(2)}',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      ElevatedButton(
+                        onPressed: _checkout,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.green,
+                          padding: EdgeInsets.symmetric(
+                              horizontal: 32, vertical: 12),
+                        ),
+                        child: Text(
+                          'Checkout',
+                          style: TextStyle(color: Colors.white),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
     );
   }
 }

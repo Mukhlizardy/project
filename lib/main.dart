@@ -28,6 +28,7 @@ class GroceryApp extends StatelessWidget {
         appBarTheme: AppBarTheme(
           elevation: 2,
           centerTitle: true,
+          foregroundColor: Colors.white,
         ),
         cardTheme: CardTheme(
           elevation: 2,
@@ -72,12 +73,21 @@ class _SplashScreenState extends State<SplashScreen> {
     // Add a small delay for splash effect
     await Future.delayed(Duration(seconds: 2));
 
-    bool isLoggedIn = await LocalAuth.isLoggedIn();
+    try {
+      bool isLoggedIn = await LocalAuth.isLoggedIn();
 
-    if (isLoggedIn) {
-      Navigator.pushReplacementNamed(context, '/home');
-    } else {
-      Navigator.pushReplacementNamed(context, '/login');
+      if (mounted) {
+        if (isLoggedIn) {
+          Navigator.pushReplacementNamed(context, '/home');
+        } else {
+          Navigator.pushReplacementNamed(context, '/login');
+        }
+      }
+    } catch (e) {
+      // If there's an error checking login status, go to login screen
+      if (mounted) {
+        Navigator.pushReplacementNamed(context, '/login');
+      }
     }
   }
 
